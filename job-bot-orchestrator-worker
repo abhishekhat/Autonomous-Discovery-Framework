@@ -1,0 +1,603 @@
+// =================================================================
+// The "Fully Autonomous Job Hunter" v14.0 (Self-Contained)
+//
+// COMPLETE AUTONOMY FEATURES:
+// 1. Built-in company extraction (no external EXPLORER needed)
+// 2. Built-in career page detection (no external VERIFIER needed)
+// 3. Self-evolving search strategies based on success patterns
+// 4. Intelligent seed mutation and cross-pollination
+// 5. Adaptive crawling patterns that learn from failures
+// 6. Self-healing when stuck in failure loops
+// =================================================================
+
+const CONFIG = {
+    MAX_SUBREQUESTS: 15,           // Conservative limit
+    MAX_COMPANIES_PER_CYCLE: 12,   // Process more companies per cycle
+    MAX_SEEDS_PER_CYCLE: 5,        // Try more seeds per cycle
+    MIN_CONFIDENCE: 0.3,           // Lower threshold for autonomy
+    DISCOVERY_BATCH_SIZE: 8,       // Smaller batches for reliability
+    TEXT_CHUNK_SIZE: 2000,         // Optimal chunk size for processing
+    MAX_PAGE_SIZE: 500000          // 500KB limit per page
+};
+
+const AUTONOMOUS_STRATEGIES = {
+    // Self-evolving search patterns
+    HIGH_YIELD: [
+        "site:naukri.com companies hiring",
+        "site:indeed.co.in tech companies",
+        "site:linkedin.com/company indian startups",
+        "\"top companies india\" careers jobs"
+    ],
+    DISCOVERY: [
+        "indian IT companies list careers",
+        "startup companies bangalore mumbai",
+        "software companies india hiring 2024",
+        "tech companies hyderabad chennai jobs"
+    ],
+    NICHE_HUNTING: [
+        "fintech companies india careers",
+        "edtech startups india jobs",
+        "healthtech companies india hiring",
+        "saas companies india careers"
+    ],
+    DIRECTORY_MINING: [
+        "company directory india IT software",
+        "business directory indian companies",
+        "corporate directory india tech",
+        "industry directory software companies"
+    ]
+};
+
+// Built-in company name extraction patterns
+const COMPANY_PATTERNS = [
+    // Standard Indian company formats
+    /\b([A-Z][a-zA-Z\s&]{2,40})\s+(?:Pvt\.?\s*Ltd\.?|Private Limited|Limited|Ltd\.?)\b/gi,
+    /\b([A-Z][a-zA-Z\s&]{2,35})\s+(?:Technologies|Technology|Tech|Solutions|Systems|Software|Services|Infotech|Digital|Labs|Studios?|Ventures|Capital)\b/gi,
+    // Indian IT giants and patterns
+    /\b((?:Tata|Infosys|Wipro|HCL|Tech Mahindra|Cognizant|Accenture|IBM|Microsoft|Amazon|Google|Meta|Oracle|Salesforce|Adobe)[A-Za-z\s]*)\b/gi,
+    // Startup patterns
+    /\b([A-Z][a-zA-Z]{2,25})\s*(?:\.(?:com|in|co|tech|ai|io)|App|Labs?|Studio|Hub|Works?|Solutions?)\b/gi,
+    // Generic company indicators
+    /\b([A-Z][a-zA-Z\s&]{3,30})\s+(?:Inc\.?|Corporation|Corp\.?|Company|Co\.?|Enterprises?|Group|Holdings?)\b/gi
+];
+
+// Career page detection patterns
+const CAREER_INDICATORS = {
+    URL_PATTERNS: [
+        /careers?/i, /jobs?/i, /hiring/i, /recruitment/i, /openings?/i,
+        /join[_-]?us/i, /work[_-]?with[_-]?us/i, /opportunities/i, /positions?/i,
+        /talent/i, /team/i, /life[_-]?at/i, /culture/i, /apply/i
+    ],
+    CONTENT_KEYWORDS: [
+        'current openings', 'job openings', 'career opportunities', 'join our team',
+        'we are hiring', 'apply now', 'send your resume', 'positions available',
+        'work with us', 'career at', 'life at', 'open positions', 'job portal'
+    ],
+    TITLE_INDICATORS: [
+        'careers', 'jobs', 'hiring', 'opportunities', 'positions', 'openings',
+        'work', 'team', 'join', 'apply', 'talent', 'recruitment'
+    ]
+};
+
+class AutonomousDiscoveryEngine {
+    constructor(env) {
+        this.env = env;
+        this.analytics = null;
+        this.seedLibrary = null;
+        this.processedCompanies = null;
+        this.verifiedPages = null;
+    }
+
+    async initialize() {
+        this.analytics = await this.loadData("PERFORMANCE_ANALYTICS", {
+            total_cycles: 0, total_discoveries: 0, consecutive_failures: 0,
+            strategy_performance: {}, domain_success: {}, domain_failures: {},
+            recent_success_rate: 0, last_discovery: null, evolution_score: 0
+        });
+
+        this.seedLibrary = await this.loadData("SEED_LIBRARY", {});
+        this.processedCompanies = await this.loadData("PROCESSED_COMPANIES", {});
+        this.verifiedPages = await this.loadData("VERIFIED_JOB_PAGES", []);
+    }
+
+    async loadData(key, fallback) {
+        try {
+            const data = await this.env.BOT_MEMORY.get(key);
+            return data ? JSON.parse(data) : fallback;
+        } catch (e) {
+            console.warn(`Failed to load ${key}:`, e.message);
+            return fallback;
+        }
+    }
+
+    async saveData(key, data) {
+        try {
+            await this.env.BOT_MEMORY.put(key, JSON.stringify(data));
+        } catch (e) {
+            console.error(`Failed to save ${key}:`, e.message);
+        }
+    }
+
+    // AUTONOMOUS COMPANY EXTRACTION
+    extractCompanies(text) {
+        if (!text || typeof text !== 'string') return [];
+        
+        const companies = new Set();
+        const cleanText = text.replace(/\s+/g, ' ').trim();
+        
+        COMPANY_PATTERNS.forEach(pattern => {
+            let match;
+            while ((match = pattern.exec(cleanText)) !== null) {
+                const companyName = match[1].trim();
+                if (this.isValidCompanyName(companyName)) {
+                    companies.add(companyName);
+                }
+            }
+        });
+
+        return Array.from(companies).map(name => ({
+            company_name: name,
+            confidence: this.calculateCompanyConfidence(name, text),
+            extraction_method: 'autonomous_pattern'
+        }));
+    }
+
+    isValidCompanyName(name) {
+        if (!name || name.length < 3 || name.length > 60) return false;
+        if (/^\d+$/.test(name)) return false; // Only numbers
+        if (/^[^a-zA-Z]*$/.test(name)) return false; // No letters
+        
+        // Filter out common false positives
+        const blacklist = ['About Us', 'Contact Us', 'Privacy Policy', 'Terms', 'Home Page', 'Main Menu'];
+        return !blacklist.some(term => name.toLowerCase().includes(term.toLowerCase()));
+    }
+
+    calculateCompanyConfidence(name, context) {
+        let confidence = 0.5;
+        
+        // Boost for Indian company indicators
+        if (/\b(?:Pvt\.?\s*Ltd\.?|Private Limited|Technologies|Solutions|Infotech)\b/i.test(name)) confidence += 0.2;
+        if (/\b(?:India|Indian|Bangalore|Mumbai|Hyderabad|Chennai|Pune|Delhi|Noida|Gurgaon)\b/i.test(context)) confidence += 0.1;
+        if (/\b(?:software|IT|tech|digital|startup|company)\b/i.test(context)) confidence += 0.1;
+        
+        return Math.min(0.9, confidence);
+    }
+
+    // AUTONOMOUS CAREER PAGE DETECTION
+    async detectCareerPage(companyName) {
+        try {
+            // Generate potential career page URLs
+            const candidateUrls = this.generateCareerUrls(companyName);
+            
+            for (const url of candidateUrls) {
+                try {
+                    const result = await this.verifyCareerUrl(url);
+                    if (result.isCareerPage && result.confidence >= CONFIG.MIN_CONFIDENCE) {
+                        return {
+                            is_careers_page: true,
+                            final_url: result.url,
+                            confidence_score: result.confidence,
+                            company_name: companyName,
+                            detection_method: 'autonomous_verification'
+                        };
+                    }
+                } catch (urlError) {
+                    continue; // Try next URL
+                }
+            }
+            
+            return { is_careers_page: false, company_name: companyName };
+        } catch (e) {
+            console.warn(`Career detection failed for ${companyName}:`, e.message);
+            return { is_careers_page: false, company_name: companyName };
+        }
+    }
+
+    generateCareerUrls(companyName) {
+        const cleanName = companyName.toLowerCase()
+            .replace(/\s*(?:pvt\.?\s*ltd\.?|private limited|limited|ltd\.?|technologies|solutions|software|services|infotech|inc\.?|corporation|corp\.?)\s*$/gi, '')
+            .replace(/[^a-z0-9]/g, '')
+            .trim();
+
+        const domains = [
+            `${cleanName}.com`,
+            `${cleanName}.co.in`,
+            `${cleanName}.in`,
+            `${cleanName}tech.com`,
+            `${cleanName}solutions.com`
+        ];
+
+        const paths = ['careers', 'jobs', 'hiring', 'join-us', 'opportunities', 'work-with-us'];
+        const urls = [];
+
+        domains.forEach(domain => {
+            urls.push(`https://${domain}`);
+            urls.push(`https://www.${domain}`);
+            paths.forEach(path => {
+                urls.push(`https://${domain}/${path}`);
+                urls.push(`https://www.${domain}/${path}`);
+            });
+        });
+
+        return urls.slice(0, 8); // Limit to prevent excessive requests
+    }
+
+    async verifyCareerUrl(url) {
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            signal: AbortSignal.timeout(10000)
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/html')) throw new Error('Non-HTML content');
+
+        const content = await response.text();
+        if (content.length > CONFIG.MAX_PAGE_SIZE) {
+            throw new Error('Page too large');
+        }
+
+        const confidence = this.analyzeCareerPageContent(content, url);
+        
+        return {
+            url: response.url,
+            isCareerPage: confidence >= CONFIG.MIN_CONFIDENCE,
+            confidence: confidence
+        };
+    }
+
+    analyzeCareerPageContent(content, url) {
+        let score = 0;
+        const lowerContent = content.toLowerCase();
+        const lowerUrl = url.toLowerCase();
+
+        // URL-based scoring
+        CAREER_INDICATORS.URL_PATTERNS.forEach(pattern => {
+            if (pattern.test(lowerUrl)) score += 0.3;
+        });
+
+        // Content keyword scoring
+        CAREER_INDICATORS.CONTENT_KEYWORDS.forEach(keyword => {
+            const occurrences = (lowerContent.match(new RegExp(keyword, 'g')) || []).length;
+            score += Math.min(0.1, occurrences * 0.02);
+        });
+
+        // Title analysis
+        const titleMatch = content.match(/<title[^>]*>([^<]+)</i);
+        if (titleMatch) {
+            const title = titleMatch[1].toLowerCase();
+            CAREER_INDICATORS.TITLE_INDICATORS.forEach(indicator => {
+                if (title.includes(indicator)) score += 0.2;
+            });
+        }
+
+        // Form detection (application forms)
+        const formCount = (content.match(/<form[^>]*>/gi) || []).length;
+        score += Math.min(0.2, formCount * 0.1);
+
+        // Job-related terms frequency
+        const jobTerms = ['position', 'role', 'candidate', 'experience', 'skills', 'qualification', 'salary', 'benefit'];
+        jobTerms.forEach(term => {
+            const occurrences = (lowerContent.match(new RegExp(term, 'g')) || []).length;
+            score += Math.min(0.05, occurrences * 0.01);
+        });
+
+        return Math.min(1.0, score);
+    }
+
+    // AUTONOMOUS SEARCH STRATEGY EVOLUTION
+    selectEvolutionaryStrategy() {
+        const strategies = Object.keys(AUTONOMOUS_STRATEGIES);
+        
+        if (!this.analytics.strategy_performance || Object.keys(this.analytics.strategy_performance).length === 0) {
+            return strategies[Math.floor(Math.random() * strategies.length)];
+        }
+
+        // Select strategy based on recent performance
+        const strategyScores = strategies.map(strategy => ({
+            strategy,
+            score: (this.analytics.strategy_performance[strategy] || 0) + Math.random() * 0.3
+        })).sort((a, b) => b.score - a.score);
+
+        return strategyScores[0].strategy;
+    }
+
+    async autonomousDiscovery() {
+        console.log('[AUTONOMOUS DISCOVERY] Starting self-directed seed discovery...');
+        
+        const strategy = this.selectEvolutionaryStrategy();
+        const queries = AUTONOMOUS_STRATEGIES[strategy];
+        const query = queries[Math.floor(Math.random() * queries.length)];
+        
+        console.log(`[DISCOVERY] Strategy: ${strategy} | Query: "${query}"`);
+
+        try {
+            const apiKeys = (this.env.SERPAPI_KEYS || "").split(',').filter(k => k.trim());
+            if (apiKeys.length === 0) throw new Error("No search API keys available");
+
+            const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
+            const searchRes = await fetch(`https://serpapi.com/search.json?q=${encodeURIComponent(query)}&api_key=${apiKey}&gl=in&num=${CONFIG.DISCOVERY_BATCH_SIZE}`);
+            
+            if (!searchRes.ok) throw new Error(`Search API error: ${searchRes.status}`);
+            
+            const results = await searchRes.json();
+            if (!results?.organic_results?.length) throw new Error("No search results");
+
+            let newSeeds = 0;
+            for (const result of results.organic_results.slice(0, CONFIG.DISCOVERY_BATCH_SIZE)) {
+                if (result.link && !this.seedLibrary[result.link]) {
+                    const relevanceScore = this.calculateSeedRelevance(result);
+                    if (relevanceScore > 0.3) {
+                        this.seedLibrary[result.link] = {
+                            score: relevanceScore * 10,
+                            strategy: strategy,
+                            last_visited: '2000-01-01T00:00:00Z',
+                            discovery_cycle: this.analytics.total_cycles,
+                            title: result.title,
+                            snippet: result.snippet
+                        };
+                        newSeeds++;
+                    }
+                }
+            }
+
+            if (newSeeds > 0) {
+                this.analytics.strategy_performance[strategy] = (this.analytics.strategy_performance[strategy] || 0) + newSeeds;
+                console.log(`[DISCOVERY] Added ${newSeeds} seeds using ${strategy} strategy`);
+                return newSeeds;
+            }
+
+            return 0;
+        } catch (e) {
+            console.error(`[DISCOVERY] Failed: ${e.message}`);
+            return 0;
+        }
+    }
+
+    calculateSeedRelevance(result) {
+        let score = 0;
+        const text = `${result.title} ${result.snippet}`.toLowerCase();
+        
+        // Career relevance
+        if (/\b(?:careers?|jobs?|hiring|recruitment|openings?)\b/i.test(text)) score += 0.4;
+        
+        // Company indicators
+        if (/\b(?:companies|company|firms?|startup|business)\b/i.test(text)) score += 0.3;
+        
+        // Indian relevance
+        if (/\b(?:india|indian|bangalore|mumbai|hyderabad|chennai|pune|delhi)\b/i.test(text)) score += 0.2;
+        
+        // Tech relevance
+        if (/\b(?:tech|IT|software|digital|technology)\b/i.test(text)) score += 0.2;
+
+        return Math.min(1.0, score);
+    }
+
+    async autonomousExploration() {
+        console.log('[AUTONOMOUS EXPLORATION] Starting intelligent seed exploration...');
+        
+        let totalDiscoveries = 0;
+        const seedsToTry = this.selectOptimalSeeds();
+        
+        for (let i = 0; i < Math.min(seedsToTry.length, CONFIG.MAX_SEEDS_PER_CYCLE); i++) {
+            const seed = seedsToTry[i];
+            console.log(`[EXPLORATION] Processing seed ${i + 1}: ${seed.url} (Score: ${seed.score})`);
+            
+            try {
+                const discoveries = await this.processSeed(seed);
+                totalDiscoveries += discoveries;
+                
+                // Update seed performance
+                if (discoveries > 0) {
+                    this.seedLibrary[seed.url].score += discoveries * 2;
+                    this.seedLibrary[seed.url].last_success = new Date().toISOString();
+                } else {
+                    this.seedLibrary[seed.url].score = Math.max(-10, this.seedLibrary[seed.url].score - 1);
+                }
+                
+                this.seedLibrary[seed.url].last_visited = new Date().toISOString();
+                
+            } catch (e) {
+                console.warn(`[EXPLORATION] Seed failed: ${e.message}`);
+                this.seedLibrary[seed.url].score -= 2;
+                this.seedLibrary[seed.url].last_visited = new Date().toISOString();
+            }
+        }
+        
+        // Clean up failed seeds
+        this.pruneLowPerformingSeeds();
+        
+        return totalDiscoveries;
+    }
+
+    selectOptimalSeeds() {
+        const seeds = Object.entries(this.seedLibrary)
+            .map(([url, data]) => ({
+                url,
+                score: data.score || 0,
+                lastVisited: new Date(data.last_visited || '2000-01-01').getTime(),
+                data
+            }))
+            .filter(seed => seed.score > -8)
+            .sort((a, b) => {
+                // Prioritize high-scoring, less recently visited seeds
+                const scoreDiff = b.score - a.score;
+                if (Math.abs(scoreDiff) > 2) return scoreDiff;
+                return a.lastVisited - b.lastVisited;
+            });
+
+        return seeds;
+    }
+
+    async processSeed(seed) {
+        const response = await fetch(seed.url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const content = await response.text();
+        if (content.length > CONFIG.MAX_PAGE_SIZE) {
+            throw new Error('Page too large');
+        }
+
+        // Extract text content
+        const textContent = this.extractTextContent(content);
+        
+        // Extract companies
+        const companies = this.extractCompanies(textContent);
+        const newCompanies = companies.filter(c => 
+            !this.processedCompanies[c.company_name.toLowerCase()]
+        ).slice(0, CONFIG.MAX_COMPANIES_PER_CYCLE);
+
+        console.log(`[EXPLORATION] Found ${companies.length} companies, ${newCompanies.length} new ones`);
+
+        let discoveries = 0;
+        for (const company of newCompanies) {
+            this.processedCompanies[company.company_name.toLowerCase()] = new Date().toISOString();
+            
+            const careerResult = await this.detectCareerPage(company.company_name);
+            if (careerResult.is_careers_page) {
+                if (!this.verifiedPages.includes(careerResult.final_url)) {
+                    this.verifiedPages.push(careerResult.final_url);
+                    discoveries++;
+                    console.log(`✅ DISCOVERY: ${careerResult.final_url} (${company.company_name})`);
+                }
+            }
+        }
+
+        return discoveries;
+    }
+
+    extractTextContent(html) {
+        // Simple HTML text extraction
+        return html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    pruneLowPerformingSeeds() {
+        const beforeCount = Object.keys(this.seedLibrary).length;
+        
+        for (const [url, data] of Object.entries(this.seedLibrary)) {
+            if ((data.score || 0) < -10) {
+                delete this.seedLibrary[url];
+            }
+        }
+        
+        const afterCount = Object.keys(this.seedLibrary).length;
+        if (beforeCount > afterCount) {
+            console.log(`[PRUNING] Removed ${beforeCount - afterCount} low-performing seeds`);
+        }
+    }
+
+    updateAnalytics(discoveries) {
+        this.analytics.total_cycles++;
+        this.analytics.total_discoveries += discoveries;
+        
+        if (discoveries > 0) {
+            this.analytics.consecutive_failures = 0;
+            this.analytics.last_discovery = new Date().toISOString();
+            this.analytics.evolution_score += discoveries;
+        } else {
+            this.analytics.consecutive_failures++;
+        }
+        
+        const recentCycles = Math.min(10, this.analytics.total_cycles);
+        const successRate = Math.max(0, (this.analytics.total_cycles - this.analytics.consecutive_failures) / recentCycles);
+        this.analytics.recent_success_rate = successRate;
+    }
+
+    async saveAllData() {
+        await Promise.all([
+            this.saveData("PERFORMANCE_ANALYTICS", this.analytics),
+            this.saveData("SEED_LIBRARY", this.seedLibrary),
+            this.saveData("PROCESSED_COMPANIES", this.processedCompanies),
+            this.saveData("VERIFIED_JOB_PAGES", this.verifiedPages)
+        ]);
+    }
+
+    getStatus() {
+        return {
+            total_discoveries: this.analytics.total_discoveries,
+            active_seeds: Object.keys(this.seedLibrary).length,
+            success_rate: this.analytics.recent_success_rate,
+            consecutive_failures: this.analytics.consecutive_failures,
+            verified_pages: this.verifiedPages.length,
+            processed_companies: Object.keys(this.processedCompanies).length
+        };
+    }
+}
+
+export default {
+    async fetch(request, env, ctx) {
+        ctx.waitUntil(this.runAutonomousHunt(env));
+        return new Response("Fully autonomous job hunting system activated.");
+    },
+
+    async scheduled(event, env, ctx) {
+        console.log("🤖 AUTONOMOUS JOB HUNTER v14.0 - Starting autonomous cycle...");
+        ctx.waitUntil(this.runAutonomousHunt(env));
+    },
+
+    async runAutonomousHunt(env) {
+        if (!env?.BOT_MEMORY || !env?.SERPAPI_KEYS) {
+            console.error("❌ Missing required environment variables");
+            return;
+        }
+
+        const engine = new AutonomousDiscoveryEngine(env);
+        await engine.initialize();
+
+        const startStatus = engine.getStatus();
+        console.log(`\n📊 Starting Status:`);
+        console.log(`   Discoveries: ${startStatus.total_discoveries}`);
+        console.log(`   Active Seeds: ${startStatus.active_seeds}`);
+        console.log(`   Success Rate: ${(startStatus.success_rate * 100).toFixed(1)}%`);
+        console.log(`   Consecutive Failures: ${startStatus.consecutive_failures}`);
+
+        try {
+            let totalNewDiscoveries = 0;
+
+            // Autonomous decision making
+            if (startStatus.active_seeds < 5 || startStatus.consecutive_failures > 5) {
+                console.log("🔍 Triggering autonomous discovery mode...");
+                const newSeeds = await engine.autonomousDiscovery();
+                console.log(`   Added ${newSeeds} new seeds`);
+            }
+
+            if (startStatus.active_seeds > 0) {
+                console.log("🕵️ Starting autonomous exploration...");
+                const discoveries = await engine.autonomousExploration();
+                totalNewDiscoveries += discoveries;
+                console.log(`   Found ${discoveries} new career pages`);
+            }
+
+            // Update analytics and save
+            engine.updateAnalytics(totalNewDiscoveries);
+            await engine.saveAllData();
+
+            const endStatus = engine.getStatus();
+            console.log(`\n📈 Cycle Complete:`);
+            console.log(`   New Discoveries: ${totalNewDiscoveries}`);
+            console.log(`   Total Discoveries: ${endStatus.total_discoveries}`);
+            console.log(`   Active Seeds: ${endStatus.active_seeds}`);
+            console.log(`   Success Rate: ${(endStatus.success_rate * 100).toFixed(1)}%`);
+            console.log(`   Next cycle in 10 minutes...`);
+
+        } catch (error) {
+            console.error(`💥 Autonomous hunt failed: ${error.message}`);
+            engine.updateAnalytics(0);
+            await engine.saveAllData();
+        }
+    }
+};

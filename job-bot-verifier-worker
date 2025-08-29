@@ -1,0 +1,87 @@
+// =================================================================
+// Verifier v10.1 (Complete)
+//
+// KEY ENHANCEMENTS:
+// - Added timeouts to prevent hanging requests.
+// - Minor prompt clarification for better focus.
+// =================================================================
+
+/**
+ * A reusable helper function that implements a per-key fallback sequence for the Gemini API.
+ */
+async function callGeminiWithFallback(prompt, env) {
+  const primaryModel = "gemini-2.5-pro";
+  const secondaryModel = "gemini-2.0-flash";
+  const keys = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(Boolean);
+  if (keys.length === 0) throw new Error("GEMINI_API_KEYS environment variable is not set.");
+  const shuffledKeys = keys.sort(() => 0.5 - Math.random());
+  for (const key of shuffledKeys) {
+    for (const model of [primaryModel, secondaryModel]) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+          signal: AbortSignal.timeout(20000) // 20s timeout
+        });
+        if (res.ok) {
+          const result = await res.json();
+          if (result.candidates && result.candidates.length > 0) return result;
+        }
+      } catch (e) { /* Ignore and try next */ }
+    }
+  }
+  throw Error("All provided API keys failed on both models.");
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    if (request.method !== 'POST') {
+      return new Response('Verifier accepts POST only', { status: 405 });
+    }
+
+    try {
+      const { company_name } = await request.json();
+      if (!company_name) return new Response('Missing company_name.', { status: 400 });
+
+      // 1. Predict URL
+      const predictorPrompt = `You are an expert system that predicts the most likely careers page URL for a given company.
+Company Name: "${company_name}"
+Focus on Indian IT/Data/AI companies. Consider patterns like /careers, /jobs, /life-at-[company], careers.[company].com.
+Your response MUST be a single, valid JSON object: {"predicted_url": "string"}.`;
+      const predictionResult = await callGeminiWithFallback(predictorPrompt, env);
+      const { predicted_url } = JSON.parse(predictionResult.candidates[0].content.parts[0].text.replaceAll('```json', '').replaceAll('```', '').trim());
+
+      if (!predicted_url) {
+        return new Response(JSON.stringify({ is_careers_page: false, reason: "Could not predict URL" }), { headers: { 'Content-Type': 'application/json' } });
+      }
+
+      // 2. Fetch and Verify Page Content
+      const siteResponse = await fetch(predicted_url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' },
+          signal: AbortSignal.timeout(10000)
+      });
+      if (!siteResponse.ok) {
+        return new Response(JSON.stringify({ is_careers_page: false, reason: `Predicted URL invalid. Status: ${siteResponse.status}` }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      const pageText = await siteResponse.text();
+
+      const verificationPrompt = `You are a recruitment analyst. Analyze the provided webpage text to determine if it is a legitimate careers page with Indian IT, data science, or AI job roles.
+Look for positive indicators: Specific job titles (e.g., "Software Engineer"), technical skills, Indian locations.
+Look for negative indicators: Vague job descriptions, requests for payment, broken links.
+Your response MUST be a single, valid JSON object: { "is_careers_page": boolean, "confidence_score": float, "final_url": "${predicted_url}" }
+
+Webpage text: """${pageText.substring(0, 30000)}"""`;
+      const verificationResult = await callGeminiWithFallback(verificationPrompt, env);
+      const finalData = JSON.parse(verificationResult.candidates[0].content.parts[0].text.replaceAll('```json', '').replaceAll('```', '').trim());
+
+      return new Response(JSON.stringify(finalData), { headers: { 'Content-Type': 'application/json' } });
+
+    } catch (error) {
+      console.error(`A critical error occurred in the verifier: ${error.message}\n${error.stack}`);
+      return new Response(JSON.stringify({
+        is_careers_page: false, confidence_score: 0, reason: `A critical exception occurred: ${error.message}`
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  },
+};
